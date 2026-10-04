@@ -1,5 +1,4 @@
-// API Client for FleetSync Self-Hosted Backend
-// This replaces the Base44 SDK and connects to your own server
+// API client for the FleetSync server.
 
 // Default to localhost for development
 // Update VITE_API_URL in .env.local to point to your production server
@@ -41,7 +40,15 @@ class APIClient {
 
     try {
       const response = await fetch(url, config);
-      const data = await response.json();
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { error: text };
+        }
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Request failed');
@@ -78,7 +85,10 @@ class APIClient {
       return this.request('/auth/logout', { method: 'POST' });
     },
 
-    me: () => this.request('/auth/me'),
+    me: async () => {
+      const data = await this.request('/auth/me');
+      return data.user || data;
+    },
 
     updateMe: (updates) =>
       this.request('/auth/me', {
@@ -254,11 +264,18 @@ class APIClient {
           body: JSON.stringify(params),
         }),
 
-      UploadFile: (params) =>
-        this.request('/integrations/core/upload-file', {
+      UploadFile: async ({ file }) => {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        return this.request('/integrations/core/upload-file', {
           method: 'POST',
-          body: JSON.stringify(params),
-        }),
+          body: JSON.stringify({ filename: file?.name, data_url: dataUrl }),
+        });
+      },
 
       GenerateImage: (params) =>
         this.request('/integrations/core/generate-image', {
@@ -370,10 +387,22 @@ class APIClient {
       },
       
       subscribe: (callback) => {
-        // WebSocket or SSE connection for real-time notifications
-        // This would typically connect to a real-time endpoint
-        console.warn('Real-time notification subscription not implemented');
-        return { unsubscribe: () => {} }; // Mock unsubscribe function
+        let stopped = false;
+        let previous = '';
+        const tick = async () => {
+          if (stopped) return;
+          try {
+            const items = await this.entities.Notification.list('-created_date', 20);
+            const signature = JSON.stringify(items.map((item) => [item.id, item.read, item.message]));
+            if (previous && signature !== previous) callback({ type: 'update', items });
+            previous = signature;
+          } catch {
+            // The next poll retries after a transient failure.
+          }
+        };
+        const timer = setInterval(tick, 15000);
+        tick();
+        return { unsubscribe: () => { stopped = true; clearInterval(timer); } };
       }
     },
     

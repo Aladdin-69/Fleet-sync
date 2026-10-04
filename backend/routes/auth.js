@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { query } from '../config/database.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { provisionAccount } from '../services/fleet.js';
 
 const router = express.Router();
 
@@ -25,13 +26,15 @@ router.post('/register', async (req, res) => {
 
     // Create user
     const result = await query(
-      `INSERT INTO users (email, password, name, created_at) 
-       VALUES ($1, $2, $3, NOW()) 
-       RETURNING id, email, name, created_at`,
+      `INSERT INTO users (email, password, name, role, subscription_status, trial_end_date, created_at)
+       VALUES ($1, $2, $3, 'admin', 'trialing', NOW() + INTERVAL '14 days', NOW())
+       RETURNING id, email, name, role, subscription_status, created_at`,
       [email, hashedPassword, name]
     );
 
     const user = result.rows[0];
+    await query('UPDATE users SET owner_id = id WHERE id = $1', [user.id]);
+    await provisionAccount({ ...user, owner_id: user.id });
     const token = generateToken(user.id);
 
     res.status(201).json({
@@ -39,6 +42,9 @@ router.post('/register', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
+        full_name: user.name,
+        role: user.role,
+        subscription_status: user.subscription_status,
         created_at: user.created_at
       },
       token
@@ -60,7 +66,7 @@ router.post('/login', async (req, res) => {
 
     // Find user
     const result = await query(
-      'SELECT id, email, password, name, subscription_status FROM users WHERE email = $1',
+      'SELECT id, email, password, name, role, subscription_status FROM users WHERE email = $1',
       [email]
     );
 
@@ -83,6 +89,8 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
+        full_name: user.name,
+        role: user.role,
         subscription_status: user.subscription_status
       },
       token
@@ -97,7 +105,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, email, name, subscription_status, calendar_provider, 
+      `SELECT id, email, name, role, subscription_status, calendar_provider, 
               stripe_customer_id, trial_end_date, created_at 
        FROM users WHERE id = $1`,
       [req.user.id]
@@ -107,7 +115,8 @@ router.get('/me', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user: result.rows[0] });
+    const user = result.rows[0];
+    res.json({ user: { ...user, full_name: user.name } });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ error: 'Failed to fetch user' });

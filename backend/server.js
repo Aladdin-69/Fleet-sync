@@ -21,6 +21,7 @@ import userRoutes from './routes/user.js';
 import appLogsRoutes from './routes/app-logs.js';
 import googleAuthRoutes from './routes/google-auth.js';
 import microsoftAuthRoutes from './routes/microsoft-auth.js';
+import { ensureSchema, uploadsDir } from './config/schema.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,7 +33,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // CORS configuration - Dynamic origin for testing
 const allowedOrigins = [
@@ -90,8 +93,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(uploadsDir));
 app.use(morgan('dev'));
 
 // Health check
@@ -129,11 +133,15 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 FleetSync Backend running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
-});
+ensureSchema()
+  .then(() => console.log('✅ Schéma FleetSync prêt'))
+  .catch((error) => console.error('❌ Schéma FleetSync incomplet:', error.message))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 FleetSync Backend running on port ${PORT}`);
+      console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+    });
+  });
 
 export default app;

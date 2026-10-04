@@ -369,6 +369,22 @@ async function runMigrations() {
     `);
     console.log('✅ Indexes created');
 
+    await appClient.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'member'`);
+    await appClient.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS owner_id UUID`);
+    await appClient.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS platform_accounts JSONB DEFAULT '{}'::jsonb`);
+    await appClient.query(`
+      CREATE TABLE IF NOT EXISTS records (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        entity_type VARCHAR(80) NOT NULL,
+        data JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await appClient.query(`CREATE INDEX IF NOT EXISTS idx_records_user_type ON records(user_id, entity_type)`);
+    console.log('✅ FleetSync records store created');
+
     await appClient.end();
     console.log('✅ Migration completed successfully!');
   } catch (error) {

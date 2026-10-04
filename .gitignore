@@ -45,7 +45,9 @@ yarn-error.log*
 lerna-debug.log*
 pnpm-debug.log*
 
-# Misc
-.cache/
+# Uploaded vehicle photos
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 temp/
 tmp/

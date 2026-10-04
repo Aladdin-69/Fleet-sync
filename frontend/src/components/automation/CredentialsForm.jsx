@@ -14,17 +14,16 @@ export default function CredentialsForm({ platform, currentEmail, onSuccess }) {
   const [testing, setTesting] = useState(false);
 
   const handleTest = async () => {
-    if (!email || !password) {
-      toast.error('Email et mot de passe requis');
+    if (!email) {
+      toast.error('Email requis');
       return;
     }
 
     setTesting(true);
     try {
-      const response = await apiClient.functions.invoke('testPlatformConnection', {
+      const response = await apiClient.functions.invoke('savePlatformAccount', {
         platform,
-        email,
-        password
+        email
       });
 
       if (response.data.success) {
@@ -40,27 +39,22 @@ export default function CredentialsForm({ platform, currentEmail, onSuccess }) {
   };
 
   const handleSave = async () => {
-    if (!email || !password) {
-      toast.error('Email et mot de passe requis');
+    if (!email) {
+      toast.error('Email requis');
       return;
     }
 
     setSaving(true);
     try {
-      const credentialsKey = `${platform}_credentials`;
-      const updateData = {
-        [credentialsKey]: {
-          email,
-          password_encrypted: btoa(password) // Simple base64 encoding (should be encrypted properly)
-        }
-      };
-
-      await apiClient.auth.updateMe(updateData);
-      toast.success(`Identifiants ${platform} sauvegardés`);
+      const response = await apiClient.functions.invoke('savePlatformAccount', {
+        platform,
+        email
+      });
+      toast.success(response.data.message || `Compte ${platform} enregistré`);
       setPassword('');
       onSuccess?.();
     } catch (error) {
-      toast.error('Erreur lors de la sauvegarde');
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     } finally {
       setSaving(false);
     }
@@ -104,7 +98,7 @@ export default function CredentialsForm({ platform, currentEmail, onSuccess }) {
         </div>
 
         <p className="text-xs text-slate-500">
-          Vos identifiants sont chiffrés et ne sont jamais stockés en clair.
+          FleetSync enregistre seulement l’adresse du compte. Le mot de passe n’est pas stocké et n’est pas envoyé à la plateforme.
         </p>
 
         <div className="flex gap-2">

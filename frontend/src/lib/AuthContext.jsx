@@ -16,6 +16,12 @@ export const AuthProvider = ({ children }) => {
   const checkUserAuth = async () => {
     try {
       setIsLoadingAuth(true);
+      if (!localStorage.getItem('auth_token')) {
+        setUser(null);
+        setIsAuthenticated(false);
+        setAuthError(null);
+        return;
+      }
       const currentUser = await apiClient.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
@@ -24,14 +30,7 @@ export const AuthProvider = ({ children }) => {
       console.error('User auth check failed:', error);
       setIsAuthenticated(false);
       setUser(null);
-      
-      // Handle auth errors
-      if (error.message === 'Request failed' || error.message.includes('401')) {
-        setAuthError({
-          type: 'auth_required',
-          message: 'Authentication required'
-        });
-      }
+      setAuthError(null);
     } finally {
       setIsLoadingAuth(false);
     }
@@ -91,6 +90,7 @@ export const AuthProvider = ({ children }) => {
       user, 
       isAuthenticated, 
       isLoadingAuth,
+      isLoadingPublicSettings: false,
       authError,
       login,
       register,

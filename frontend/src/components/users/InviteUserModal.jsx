@@ -11,17 +11,18 @@ import { toast } from 'sonner';
 export default function InviteUserModal({ open, onClose }) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('user');
+  const [temporaryPassword, setTemporaryPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleInvite = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await apiClient.users.inviteUser(email, role);
-      toast.success('Invitation envoyée avec succès');
+      const result = await apiClient.users.inviteUser(email, role);
+      setTemporaryPassword(result.temporary_password || '');
+      toast.success(result.message || 'Compte créé');
       setEmail('');
       setRole('user');
-      onClose();
     } catch (error) {
       toast.error('Erreur lors de l\'envoi de l\'invitation');
     } finally {
@@ -69,6 +70,13 @@ export default function InviteUserModal({ open, onClose }) {
             </p>
           </div>
           
+          {temporaryPassword && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Mot de passe temporaire : <span className="font-mono font-semibold">{temporaryPassword}</span>
+              <p className="mt-1 text-xs">Transmettez-le à la personne invitée. Il ne sera plus affiché.</p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button type="button" variant="outline" onClick={onClose}>
               Annuler

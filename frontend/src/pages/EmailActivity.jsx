@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/api/client';
 import { Mail, Search, CheckCircle2, XCircle, AlertTriangle, Clock, ChevronDown, ExternalLink } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
@@ -30,11 +32,34 @@ function EmailActivityContent() {
   const [actionFilter, setActionFilter] = useState('all');
   const [platformFilter, setPlatformFilter] = useState('all');
   const [expandedEmail, setExpandedEmail] = useState(null);
+  const [draft, setDraft] = useState({ subject: '', sender: '', content: '' });
+  const [importing, setImporting] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data: activities = [], isLoading } = useQuery({
     queryKey: ['email-activities'],
     queryFn: () => apiClient.entities.EmailActivity.list('-received_at', 50)
   });
+
+  const importEmail = async (event) => {
+    event.preventDefault();
+    setImporting(true);
+    try {
+      await apiClient.entities.EmailActivity.create({
+        subject: draft.subject,
+        sender: draft.sender,
+        content: draft.content,
+        received_at: new Date().toISOString(),
+        processed: false,
+        action_taken: 'pending_review',
+        platform_detected: 'unknown'
+      });
+      setDraft({ subject: '', sender: '', content: '' });
+      queryClient.invalidateQueries({ queryKey: ['email-activities'] });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const filteredActivities = activities.filter(activity => {
     const matchesSearch = activity.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -52,6 +77,14 @@ function EmailActivityContent() {
           <h1 className="text-2xl font-bold text-slate-900">{t('email.title')}</h1>
           <p className="text-slate-500 mt-1">{t('email.subtitle')}</p>
         </div>
+
+        <form onSubmit={importEmail} className="bg-white rounded-2xl border border-slate-200 p-4 mb-6 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-900">Importer un email de réservation</h2>
+          <Input placeholder="Sujet" value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} required />
+          <Input type="email" placeholder="Expéditeur" value={draft.sender} onChange={(e) => setDraft({ ...draft, sender: e.target.value })} required />
+          <Textarea placeholder="Corps du message" value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} required />
+          <Button type="submit" disabled={importing}>{importing ? 'Import...' : 'Enregistrer l’email'}</Button>
+        </form>
 
         {/* Filters */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-6">

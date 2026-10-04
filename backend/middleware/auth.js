@@ -17,7 +17,7 @@ export const authenticateToken = async (req, res, next) => {
     
     // Fetch user from database
     const result = await query(
-      'SELECT id, email, name, subscription_status, calendar_provider FROM users WHERE id = $1',
+      'SELECT id, email, name, role, subscription_status, calendar_provider, stripe_customer_id FROM users WHERE id = $1',
       [decoded.userId]
     );
 

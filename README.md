@@ -1,6 +1,6 @@
-# 🚗 FleetSync - Complete Migration + Automated AWS Deployment
+# FleetSync
 
-**Your Base44 application is now 100% independent and ready for AWS!**
+Application de gestion de flotte auto-hébergée. Le frontend React parle au backend Express, et les données vivent dans PostgreSQL. Aucun service Base44 n’est requis.
 
 ---
 
