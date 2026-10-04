@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: fleetsync-db
+    environment:
+      POSTGRES_DB: fleetsync
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password_change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - fleetsync-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build: ./backend
+    container_name: fleetsync-backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: fleetsync
+      DB_USER: postgres
+      DB_PASSWORD: postgres_password_change_me
+      PORT: 3000
+      NODE_ENV: production
+      BACKEND_URL: http://localhost:3000
+      FRONTEND_URL: http://localhost:80
+      JWT_SECRET: your-production-jwt-secret-here
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fleetsync-network
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    command: npm start
+
+  # Frontend (Nginx serving static files)
+  frontend:
+    build: ./frontend
+    container_name: fleetsync-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - fleetsync-network
+
+  # Redis (optional, for caching/sessions)
+  redis:
+    image: redis:7-alpine
+    container_name: fleetsync-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - fleetsync-network
+    volumes:
+      - redis_data:/data
+
+networks:
+  fleetsync-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
