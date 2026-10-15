@@ -12,6 +12,7 @@ import {
   syncBookingsToCalendar,
   syncPayPalLedger,
 } from '../services/fleet.js';
+import { readBookingMailbox } from '../services/mailbox.js';
 
 const router = express.Router();
 
@@ -37,6 +38,9 @@ router.post('/invoke/:functionName', authenticateToken, async (req, res, next) =
         break;
       case 'processBookingEmails':
         data = await processInbox(req.user.id);
+        break;
+      case 'readBookingMailbox':
+        data = await readBookingMailbox(req.user.id);
         break;
       case 'suggestAlertRules':
         data = { suggestions: await suggestRulesForUser(req.user.id) };
