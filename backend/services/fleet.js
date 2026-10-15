@@ -3,7 +3,14 @@ import { query } from '../config/database.js';
 import { findConflicts, planFromPriceId } from './bookingRules.js';
 import { matchVehicle, parseBookingEmail } from './emailParser.js';
 import { suggestAlertRules } from './alertSuggestions.js';
-import { accountIdFor, createRecord, listRecords, updateRecord } from './store.js';
+import { accountIdFor, createRecord, deleteRecord, listRecords, updateRecord } from './store.js';
+import {
+  assertGetaroundListingUrl,
+  bookingWindow,
+  fetchListingHtml,
+  parseGetaroundCalendar,
+  unavailableRanges,
+} from './getaroundListing.js';
 
 async function userEmail(userId) {
   const result = await query('SELECT email, calendar_provider, calendar_access_token, calendar_refresh_token FROM users WHERE id = $1', [userId]);
@@ -273,6 +280,75 @@ export async function processInbox(userId) {
     emails_processed: pending.length,
     bookings_created: bookingsCreated,
     bookings_updated: bookingsUpdated,
+    summary,
+  };
+}
+
+function listingBlockLabel(range) {
+  const kind = range.kind === 'morning' ? 'matin' : range.kind === 'afternoon' ? 'après-midi' : 'journée';
+  const [ys, ms, ds] = range.start.split('-');
+  const start = `${ds}/${ms}/${ys}`;
+  if (range.start === range.end) return `${start} (${kind})`;
+  const [ye, me, de] = range.end.split('-');
+  return `${start} → ${de}/${me}/${ye} (${kind})`;
+}
+
+export async function importGetaroundListing(userId, { vehicle_id: vehicleId, url } = {}) {
+  const accountId = await accountIdFor(userId);
+  const profile = await userEmail(userId);
+  const vehicles = await listRecords(accountId, 'vehicle');
+  const vehicle = vehicles.find((item) => item.id === vehicleId);
+  if (!vehicle) {
+    const error = new Error('Véhicule introuvable');
+    error.status = 404;
+    throw error;
+  }
+
+  const listingUrl = assertGetaroundListingUrl(url || vehicle.getaround_listing_url);
+  const html = await fetchListingHtml(listingUrl);
+  const ranges = unavailableRanges(parseGetaroundCalendar(html));
+  const bookings = await listRecords(accountId, 'booking');
+  const previous = bookings.filter((booking) => booking.vehicle_id === vehicle.id && booking.source === 'getaround_listing');
+  for (const booking of previous) {
+    await deleteRecord(accountId, 'booking', booking.id);
+  }
+
+  let created = 0;
+  for (const range of ranges) {
+    const window = bookingWindow(range);
+    await createRecord(accountId, 'booking', {
+      vehicle_id: vehicle.id,
+      platform: 'getaround',
+      start_date: window.start_date,
+      end_date: window.end_date,
+      customer_name: 'Annonce publique',
+      guest_name: 'Annonce publique',
+      status: 'confirmed',
+      source: 'getaround_listing',
+      block_kind: range.kind,
+      notes: 'Lu sur l’annonce publique Getaround. Cette période n’est pas renvoyée vers la plateforme.',
+    }, { email: profile.email });
+    created += 1;
+  }
+
+  const readAt = new Date().toISOString();
+  await updateRecord(accountId, 'vehicle', vehicle.id, {
+    getaround_listing_url: listingUrl,
+    listing_read_at: readAt,
+    listing_blocks: ranges,
+  });
+
+  const preview = ranges.slice(0, 8).map(listingBlockLabel).join(', ');
+  const extra = ranges.length > 8 ? ` et ${ranges.length - 8} autre(s)` : '';
+  const summary = ranges.length === 0
+    ? 'Aucune date indisponible sur la période publiée. Les anciens blocages lus sur cette annonce ont été retirés.'
+    : `${created} période(s) indisponible(s) importée(s) dans FleetSync : ${preview}${extra}. Rien n’est renvoyé vers Getaround ni Turo.`;
+
+  return {
+    ranges,
+    count: ranges.length,
+    bookings_created: created,
+    listing_read_at: readAt,
     summary,
   };
 }
