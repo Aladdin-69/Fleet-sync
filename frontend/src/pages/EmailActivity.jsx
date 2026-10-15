@@ -111,7 +111,7 @@ function EmailActivityContent() {
             </Button>
           </div>
           <p className="text-xs text-slate-500">
-            Un email Turo ferme le calendrier Getaround, et l’inverse. Collez l’adresse iCal du véhicule dans chaque plateforme.
+            Un email Turo ou Getaround est lu ici. L’autre plateforme en France ne reçoit pas ce calendrier : une alerte indique les dates à bloquer à la main.
           </p>
         </form>
 
