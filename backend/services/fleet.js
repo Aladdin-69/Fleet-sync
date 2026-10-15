@@ -39,12 +39,33 @@ export async function provisionAccount(user) {
   }
 }
 
-async function ensureFeedToken(accountId, vehicle) {
-  if (!vehicle?.id || vehicle.calendar_token) return vehicle?.calendar_token || null;
-  const token = crypto.randomBytes(24).toString('hex');
-  await updateRecord(accountId, 'vehicle', vehicle.id, { calendar_token: token });
-  vehicle.calendar_token = token;
-  return token;
+const PLATFORM_LABELS = {
+  turo: 'Turo',
+  getaround: 'Getaround',
+  hunos_rent: 'Hunos Rent',
+};
+
+async function noteManualBlocks(accountId, ownerEmail, vehicle, booking, action) {
+  const targets = (vehicle.platforms || []).filter((platform) => platform !== booking.platform && PLATFORM_LABELS[platform]);
+  const start = String(booking.start_date).slice(0, 10);
+  const end = String(booking.end_date).slice(0, 10);
+  const source = PLATFORM_LABELS[booking.platform] || booking.platform || 'une plateforme';
+
+  for (const platform of targets) {
+    const label = PLATFORM_LABELS[platform];
+    await addNotification(accountId, ownerEmail, {
+      type: 'manual_block',
+      title: action === 'cancel' ? `Rouvrir ${label}` : `Bloquer sur ${label}`,
+      message: action === 'cancel'
+        ? `${vehicle.name} : la location ${source} du ${start} au ${end} est annulée. Retirez l’indisponibilité dans le calendrier ${label}.`
+        : `${vehicle.name} : location ${source} du ${start} au ${end}. ${label} France ne reçoit pas de calendrier iCal. Ouvrez le calendrier de l’annonce et bloquez ces dates.`,
+      severity: 'warning',
+      vehicle_id: vehicle.id,
+      booking_id: booking.id,
+    });
+  }
+
+  return targets.map((platform) => PLATFORM_LABELS[platform]);
 }
 
 async function addNotification(accountId, email, notification) {
@@ -90,8 +111,8 @@ export async function syncBookingAcrossPlatforms(userId, bookingId, sourcePlatfo
   for (const platform of targets) {
     const blocked = conflicts.length > 0;
     syncResults[platform] = blocked
-      ? { status: 'blocked', message: 'Conflit de dates détecté, le calendrier de cette plateforme n’est pas fermé' }
-      : { status: 'success', message: `Calendrier ${platform} mis à jour via le flux iCal` };
+      ? { status: 'blocked', message: 'Conflit de dates détecté, ne pas bloquer cette plateforme' }
+      : { status: 'manual', message: `${platform} France n’accepte pas d’iCal : dates à bloquer à la main` };
 
     await createRecord(accountId, 'automation_log', {
       vehicle_id: vehicle.id,
@@ -156,7 +177,7 @@ export async function processInbox(userId) {
 
   let bookingsCreated = 0;
   let bookingsUpdated = 0;
-  const refreshedFeeds = new Set();
+  const manualPlatforms = new Set();
 
   for (const email of pending) {
     const parsed = parseBookingEmail({
@@ -177,8 +198,8 @@ export async function processInbox(userId) {
         bookingsUpdated += 1;
         bookingId = existing.id;
         action = 'synced';
-        const token = await ensureFeedToken(accountId, vehicle);
-        if (token) refreshedFeeds.add(token);
+        const labels = await noteManualBlocks(accountId, profile.email, vehicle, { ...existing, status: 'cancelled' }, 'cancel');
+        labels.forEach((label) => manualPlatforms.add(label));
       }
     } else {
       const draft = {
@@ -215,8 +236,8 @@ export async function processInbox(userId) {
         bookingsCreated += 1;
         bookingId = created.id;
         action = 'synced';
-        const token = await ensureFeedToken(accountId, vehicle);
-        if (token) refreshedFeeds.add(token);
+        const labels = await noteManualBlocks(accountId, profile.email, vehicle, created, 'block');
+        labels.forEach((label) => manualPlatforms.add(label));
         if (parsed.total_price) {
           await createRecord(accountId, 'revenue', {
             vehicle_id: vehicle.id,
@@ -241,8 +262,8 @@ export async function processInbox(userId) {
     });
   }
 
-  const feedNote = refreshedFeeds.size
-    ? ' Les calendriers Turo et Getaround qui importent le flux iCal de ces véhicules verront le blocage au prochain rafraîchissement.'
+  const feedNote = manualPlatforms.size
+    ? ` À bloquer à la main sur ${[...manualPlatforms].join(' et ')} : ces plateformes en France n’importent pas d’iCal.`
     : '';
   const summary = pending.length === 0
     ? 'Aucun email en attente. Collez un email de réservation dans Activité email, ou lancez la lecture de la boîte mail.'

@@ -6,11 +6,6 @@ import { cn } from '@/lib/utils';
 import { format, parseISO, differenceInDays, differenceInHours } from 'date-fns';
 import { useLanguage } from '@/components/LanguageProvider';
 
-function feedUrl(token, platform) {
-  const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api\/?$/, '');
-  return `${apiBase}/api/calendar/feed/${token}/${platform}.ics`;
-}
-
 const platformBadges = {
   turo: { label: 'Turo', color: 'bg-slate-900 text-white border-slate-900' },
   getaround: { label: 'Getaround', color: 'bg-purple-100 text-purple-700 border-purple-200' },
@@ -141,20 +136,10 @@ export default function VehicleCard({ vehicle, currentBooking, onClick, onEdit, 
           <p className="text-xs text-slate-400 mt-1 font-mono">{vehicle.license_plate}</p>
         )}
         
-        {vehicle.calendar_token && vehicle.platforms?.some((platform) => platform === 'turo' || platform === 'getaround') && (
-          <div className="mt-4 space-y-1" onClick={(event) => event.stopPropagation()}>
-            <p className="text-xs font-medium text-slate-500">Calendriers à importer</p>
-            {vehicle.platforms.includes('turo') && (
-              <a className="block truncate text-xs text-blue-600 hover:underline" href={feedUrl(vehicle.calendar_token, 'turo')} target="_blank" rel="noreferrer">
-                Adresse Turo
-              </a>
-            )}
-            {vehicle.platforms.includes('getaround') && (
-              <a className="block truncate text-xs text-blue-600 hover:underline" href={feedUrl(vehicle.calendar_token, 'getaround')} target="_blank" rel="noreferrer">
-                Adresse Getaround
-              </a>
-            )}
-          </div>
+        {vehicle.platforms?.some((platform) => platform === 'turo' || platform === 'getaround') && (
+          <p className="mt-4 text-xs text-slate-500">
+            Turo France et Getaround France ne prennent pas d’iCal. FleetSync prépare le blocage, il reste à le saisir dans leur calendrier.
+          </p>
         )}
 
         {/* Platforms */}
