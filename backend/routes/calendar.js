@@ -2,8 +2,49 @@ import express from 'express';
 import { google } from 'googleapis';
 import { query } from '../config/database.js';
 import { authenticateToken, requireSubscription } from '../middleware/auth.js';
+import { buildIcalFeed } from '../services/icalFeed.js';
 
 const router = express.Router();
+
+router.get('/feed/:token/:platform', async (req, res, next) => {
+  try {
+    const platform = String(req.params.platform || '').replace(/\.ics$/, '');
+    const allowed = ['turo', 'getaround', 'hunos_rent'];
+    if (!allowed.includes(platform)) return res.status(404).type('text/plain').send('Plateforme inconnue');
+
+    const vehicleResult = await query(
+      `SELECT id, user_id, data
+       FROM records
+       WHERE entity_type = 'vehicle' AND data->>'calendar_token' = $1
+       LIMIT 1`,
+      [req.params.token]
+    );
+    const vehicleRow = vehicleResult.rows[0];
+    if (!vehicleRow) return res.status(404).type('text/plain').send('Calendrier introuvable');
+
+    const vehicle = { ...(vehicleRow.data || {}), id: vehicleRow.id };
+    const bookingResult = await query(
+      `SELECT id, data
+       FROM records
+       WHERE user_id = $1 AND entity_type = 'booking'`,
+      [vehicleRow.user_id]
+    );
+    const bookings = bookingResult.rows
+      .map((row) => ({ ...(row.data || {}), id: row.id }))
+      .filter((booking) => booking.vehicle_id === vehicle.id);
+
+    const ics = buildIcalFeed({
+      vehicleName: vehicle.name,
+      consumerPlatform: platform,
+      bookings,
+    });
+    res.set('Content-Type', 'text/calendar; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.send(ics);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Google Calendar OAuth2 client
 const getOAuth2Client = () => {

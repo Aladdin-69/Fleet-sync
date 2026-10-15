@@ -39,6 +39,14 @@ export async function provisionAccount(user) {
   }
 }
 
+async function ensureFeedToken(accountId, vehicle) {
+  if (!vehicle?.id || vehicle.calendar_token) return vehicle?.calendar_token || null;
+  const token = crypto.randomBytes(24).toString('hex');
+  await updateRecord(accountId, 'vehicle', vehicle.id, { calendar_token: token });
+  vehicle.calendar_token = token;
+  return token;
+}
+
 async function addNotification(accountId, email, notification) {
   return createRecord(accountId, 'notification', {
     type: notification.type || 'system',
@@ -82,8 +90,8 @@ export async function syncBookingAcrossPlatforms(userId, bookingId, sourcePlatfo
   for (const platform of targets) {
     const blocked = conflicts.length > 0;
     syncResults[platform] = blocked
-      ? { status: 'blocked', message: 'Conflit de dates détecté, aucune fermeture automatique' }
-      : { status: 'success', message: `Dates marquées occupées sur ${platform} dans FleetSync` };
+      ? { status: 'blocked', message: 'Conflit de dates détecté, le calendrier de cette plateforme n’est pas fermé' }
+      : { status: 'success', message: `Calendrier ${platform} mis à jour via le flux iCal` };
 
     await createRecord(accountId, 'automation_log', {
       vehicle_id: vehicle.id,
@@ -148,6 +156,7 @@ export async function processInbox(userId) {
 
   let bookingsCreated = 0;
   let bookingsUpdated = 0;
+  const refreshedFeeds = new Set();
 
   for (const email of pending) {
     const parsed = parseBookingEmail({
@@ -168,6 +177,8 @@ export async function processInbox(userId) {
         bookingsUpdated += 1;
         bookingId = existing.id;
         action = 'synced';
+        const token = await ensureFeedToken(accountId, vehicle);
+        if (token) refreshedFeeds.add(token);
       }
     } else {
       const draft = {
@@ -204,6 +215,8 @@ export async function processInbox(userId) {
         bookingsCreated += 1;
         bookingId = created.id;
         action = 'synced';
+        const token = await ensureFeedToken(accountId, vehicle);
+        if (token) refreshedFeeds.add(token);
         if (parsed.total_price) {
           await createRecord(accountId, 'revenue', {
             vehicle_id: vehicle.id,
@@ -228,9 +241,12 @@ export async function processInbox(userId) {
     });
   }
 
+  const feedNote = refreshedFeeds.size
+    ? ' Les calendriers Turo et Getaround qui importent le flux iCal de ces véhicules verront le blocage au prochain rafraîchissement.'
+    : '';
   const summary = pending.length === 0
-    ? 'Aucun email en attente. Collez un email de réservation dans Activité email, puis relancez la synchronisation.'
-    : `${pending.length} email(s) lu(s), ${bookingsCreated} réservation(s) créée(s), ${bookingsUpdated} mise(s) à jour.`;
+    ? 'Aucun email en attente. Collez un email de réservation dans Activité email, ou lancez la lecture de la boîte mail.'
+    : `${pending.length} email(s) lu(s), ${bookingsCreated} réservation(s) créée(s), ${bookingsUpdated} mise(s) à jour.${feedNote}`;
 
   return {
     emails_processed: pending.length,
