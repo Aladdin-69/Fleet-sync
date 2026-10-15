@@ -53,7 +53,7 @@ function CalendarContent() {
       const endDate = parseISO(booking.end_date);
       let newStatus = booking.status;
 
-      if (booking.status === 'cancelled') return;
+      if (booking.status === 'cancelled' || booking.source === 'getaround_listing') return;
 
       if (isAfter(now, endDate)) {
         newStatus = 'completed';

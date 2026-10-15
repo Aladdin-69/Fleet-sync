@@ -27,7 +27,8 @@ export default function AddVehicleModal({ open, onClose, onSave, isLoading }) {
     model: '',
     platforms: [],
     calendar_provider: 'none',
-    image_url: ''
+    image_url: '',
+    getaround_listing_url: ''
   });
   const [isEnriching, setIsEnriching] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -315,6 +316,21 @@ export default function AddVehicleModal({ open, onClose, onSave, isLoading }) {
               </div>
             </div>
             
+            <div>
+              <Label htmlFor="getaround-url">Lien d’annonce Getaround</Label>
+              <Input
+                id="getaround-url"
+                type="url"
+                placeholder="https://fr.getaround.com/location-voiture/..."
+                value={formData.getaround_listing_url}
+                onChange={(e) => setFormData(prev => ({ ...prev, getaround_listing_url: e.target.value }))}
+                className="mt-1.5"
+              />
+              <p className="text-xs text-slate-500 mt-1.5">
+                Lien public de l’annonce. La lecture des dates prises se lance ensuite depuis la fiche véhicule.
+              </p>
+            </div>
+
             <div>
               <Label className="mb-3 block">{t('addVehicle.platforms')}</Label>
               <div className="flex flex-wrap gap-4">

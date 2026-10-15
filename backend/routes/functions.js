@@ -5,6 +5,7 @@ import {
   activateLocalPlan,
   connectCalendar,
   notifyAutomationErrors,
+  importGetaroundListing,
   processInbox,
   savePlatformAccount,
   suggestRulesForUser,
@@ -41,6 +42,9 @@ router.post('/invoke/:functionName', authenticateToken, async (req, res, next) =
         break;
       case 'readBookingMailbox':
         data = await readBookingMailbox(req.user.id);
+        break;
+      case 'readGetaroundListing':
+        data = await importGetaroundListing(req.user.id, params);
         break;
       case 'suggestAlertRules':
         data = { suggestions: await suggestRulesForUser(req.user.id) };

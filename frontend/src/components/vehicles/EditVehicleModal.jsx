@@ -26,7 +26,8 @@ export default function EditVehicleModal({ open, onClose, vehicle, onSave, isLoa
     model: '',
     platforms: [],
     calendar_provider: 'none',
-    image_url: ''
+    image_url: '',
+    getaround_listing_url: ''
   });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -42,7 +43,8 @@ export default function EditVehicleModal({ open, onClose, vehicle, onSave, isLoa
         model: vehicle.model || '',
         platforms: vehicle.platforms || [],
         calendar_provider: vehicle.calendar_provider || 'none',
-        image_url: vehicle.image_url || ''
+        image_url: vehicle.image_url || '',
+        getaround_listing_url: vehicle.getaround_listing_url || ''
       });
     }
   }, [vehicle]);
@@ -243,6 +245,21 @@ export default function EditVehicleModal({ open, onClose, vehicle, onSave, isLoa
               </div>
             </div>
             
+            <div>
+              <Label htmlFor="edit-getaround-url">Lien d’annonce Getaround</Label>
+              <Input
+                id="edit-getaround-url"
+                type="url"
+                placeholder="https://fr.getaround.com/location-voiture/..."
+                value={formData.getaround_listing_url}
+                onChange={(e) => setFormData(prev => ({ ...prev, getaround_listing_url: e.target.value }))}
+                className="mt-1.5"
+              />
+              <p className="text-xs text-slate-500 mt-1.5">
+                Enregistrez le lien public, puis lancez la lecture depuis la fiche. FleetSync recopie les dates déjà prises. Rien n’est envoyé à Getaround ni à Turo.
+              </p>
+            </div>
+
             <div>
               <Label className="mb-3 block">{t('addVehicle.platforms')}</Label>
               <div className="flex flex-wrap gap-4">
