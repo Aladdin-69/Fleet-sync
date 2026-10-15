@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { useLanguage } from '@/components/LanguageProvider';
 import ProtectedPageWrapper from '@/components/ProtectedPageWrapper';
 
@@ -55,7 +56,11 @@ function EmailActivityContent() {
         platform_detected: 'unknown'
       });
       setDraft({ subject: '', sender: '', content: '' });
+      await apiClient.functions.invoke('processBookingEmails');
       queryClient.invalidateQueries({ queryKey: ['email-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+    } catch (error) {
+      toast.error(error.message || 'Lecture impossible');
     } finally {
       setImporting(false);
     }
@@ -83,7 +88,31 @@ function EmailActivityContent() {
           <Input placeholder="Sujet" value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} required />
           <Input type="email" placeholder="Expéditeur" value={draft.sender} onChange={(e) => setDraft({ ...draft, sender: e.target.value })} required />
           <Textarea placeholder="Corps du message" value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} required />
-          <Button type="submit" disabled={importing}>{importing ? 'Import...' : 'Enregistrer l’email'}</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={importing}>{importing ? 'Lecture...' : 'Lire cet email'}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={importing}
+              onClick={async () => {
+                setImporting(true);
+                try {
+                  await apiClient.functions.invoke('readBookingMailbox');
+                  queryClient.invalidateQueries({ queryKey: ['email-activities'] });
+                  queryClient.invalidateQueries({ queryKey: ['bookings'] });
+                } catch (error) {
+                  toast.error(error.message || 'Lecture de la boîte impossible');
+                } finally {
+                  setImporting(false);
+                }
+              }}
+            >
+              Lire la boîte mail
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Un email Turo ou Getaround est lu ici. L’autre plateforme en France ne reçoit pas ce calendrier : une alerte indique les dates à bloquer à la main.
+          </p>
         </form>
 
         {/* Filters */}

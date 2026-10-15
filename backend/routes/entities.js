@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import crypto from 'crypto';
 import {
   accountIdFor,
   createRecord,
@@ -104,6 +105,14 @@ router.get('/:entityType', async (req, res, next) => {
     const { accountId } = await context(req);
     const { sort, limit, filter } = queryOptions(req);
     const rows = type === 'user' ? await listUsers(accountId) : await listRecords(accountId, type);
+    if (type === 'vehicle') {
+      for (const vehicle of rows) {
+        if (!vehicle.calendar_token) {
+          vehicle.calendar_token = crypto.randomBytes(24).toString('hex');
+          await updateRecord(accountId, 'vehicle', vehicle.id, { calendar_token: vehicle.calendar_token });
+        }
+      }
+    }
     res.json(sortDocuments(rows.filter((item) => matchesFilter(item, filter)), sort).slice(0, limit));
   } catch (error) {
     next(error);
@@ -116,7 +125,7 @@ router.post('/:entityType', async (req, res, next) => {
     if (type === 'user') return res.status(405).json({ error: 'Utilisez l’invitation pour ajouter un utilisateur' });
     const { accountId, email } = await context(req);
     const defaults = type === 'vehicle'
-      ? { status: 'available', archived: false, platforms: [] }
+      ? { status: 'available', archived: false, platforms: [], calendar_token: crypto.randomBytes(24).toString('hex') }
       : {};
     const created = await createRecord(accountId, type, { ...defaults, ...req.body }, { email });
     res.status(201).json(created);

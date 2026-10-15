@@ -3,7 +3,14 @@ import { query } from '../config/database.js';
 import { findConflicts, planFromPriceId } from './bookingRules.js';
 import { matchVehicle, parseBookingEmail } from './emailParser.js';
 import { suggestAlertRules } from './alertSuggestions.js';
-import { accountIdFor, createRecord, listRecords, updateRecord } from './store.js';
+import { accountIdFor, createRecord, deleteRecord, listRecords, updateRecord } from './store.js';
+import {
+  assertGetaroundListingUrl,
+  bookingWindow,
+  fetchListingHtml,
+  parseGetaroundCalendar,
+  unavailableRanges,
+} from './getaroundListing.js';
 
 async function userEmail(userId) {
   const result = await query('SELECT email, calendar_provider, calendar_access_token, calendar_refresh_token FROM users WHERE id = $1', [userId]);
@@ -37,6 +44,35 @@ export async function provisionAccount(user) {
       last_sync: new Date().toISOString(),
     }, { email: user.email });
   }
+}
+
+const PLATFORM_LABELS = {
+  turo: 'Turo',
+  getaround: 'Getaround',
+  hunos_rent: 'Hunos Rent',
+};
+
+async function noteManualBlocks(accountId, ownerEmail, vehicle, booking, action) {
+  const targets = (vehicle.platforms || []).filter((platform) => platform !== booking.platform && PLATFORM_LABELS[platform]);
+  const start = String(booking.start_date).slice(0, 10);
+  const end = String(booking.end_date).slice(0, 10);
+  const source = PLATFORM_LABELS[booking.platform] || booking.platform || 'une plateforme';
+
+  for (const platform of targets) {
+    const label = PLATFORM_LABELS[platform];
+    await addNotification(accountId, ownerEmail, {
+      type: 'manual_block',
+      title: action === 'cancel' ? `Rouvrir ${label}` : `Bloquer sur ${label}`,
+      message: action === 'cancel'
+        ? `${vehicle.name} : la location ${source} du ${start} au ${end} est annulée. Retirez l’indisponibilité dans le calendrier ${label}.`
+        : `${vehicle.name} : location ${source} du ${start} au ${end}. ${label} France ne reçoit pas de calendrier iCal. Ouvrez le calendrier de l’annonce et bloquez ces dates.`,
+      severity: 'warning',
+      vehicle_id: vehicle.id,
+      booking_id: booking.id,
+    });
+  }
+
+  return targets.map((platform) => PLATFORM_LABELS[platform]);
 }
 
 async function addNotification(accountId, email, notification) {
@@ -82,8 +118,8 @@ export async function syncBookingAcrossPlatforms(userId, bookingId, sourcePlatfo
   for (const platform of targets) {
     const blocked = conflicts.length > 0;
     syncResults[platform] = blocked
-      ? { status: 'blocked', message: 'Conflit de dates détecté, aucune fermeture automatique' }
-      : { status: 'success', message: `Dates marquées occupées sur ${platform} dans FleetSync` };
+      ? { status: 'blocked', message: 'Conflit de dates détecté, ne pas bloquer cette plateforme' }
+      : { status: 'manual', message: `${platform} France n’accepte pas d’iCal : dates à bloquer à la main` };
 
     await createRecord(accountId, 'automation_log', {
       vehicle_id: vehicle.id,
@@ -148,6 +184,7 @@ export async function processInbox(userId) {
 
   let bookingsCreated = 0;
   let bookingsUpdated = 0;
+  const manualPlatforms = new Set();
 
   for (const email of pending) {
     const parsed = parseBookingEmail({
@@ -168,6 +205,8 @@ export async function processInbox(userId) {
         bookingsUpdated += 1;
         bookingId = existing.id;
         action = 'synced';
+        const labels = await noteManualBlocks(accountId, profile.email, vehicle, { ...existing, status: 'cancelled' }, 'cancel');
+        labels.forEach((label) => manualPlatforms.add(label));
       }
     } else {
       const draft = {
@@ -204,6 +243,8 @@ export async function processInbox(userId) {
         bookingsCreated += 1;
         bookingId = created.id;
         action = 'synced';
+        const labels = await noteManualBlocks(accountId, profile.email, vehicle, created, 'block');
+        labels.forEach((label) => manualPlatforms.add(label));
         if (parsed.total_price) {
           await createRecord(accountId, 'revenue', {
             vehicle_id: vehicle.id,
@@ -228,14 +269,86 @@ export async function processInbox(userId) {
     });
   }
 
+  const feedNote = manualPlatforms.size
+    ? ` À bloquer à la main sur ${[...manualPlatforms].join(' et ')} : ces plateformes en France n’importent pas d’iCal.`
+    : '';
   const summary = pending.length === 0
-    ? 'Aucun email en attente. Collez un email de réservation dans Activité email, puis relancez la synchronisation.'
-    : `${pending.length} email(s) lu(s), ${bookingsCreated} réservation(s) créée(s), ${bookingsUpdated} mise(s) à jour.`;
+    ? 'Aucun email en attente. Collez un email de réservation dans Activité email, ou lancez la lecture de la boîte mail.'
+    : `${pending.length} email(s) lu(s), ${bookingsCreated} réservation(s) créée(s), ${bookingsUpdated} mise(s) à jour.${feedNote}`;
 
   return {
     emails_processed: pending.length,
     bookings_created: bookingsCreated,
     bookings_updated: bookingsUpdated,
+    summary,
+  };
+}
+
+function listingBlockLabel(range) {
+  const kind = range.kind === 'morning' ? 'matin' : range.kind === 'afternoon' ? 'après-midi' : 'journée';
+  const [ys, ms, ds] = range.start.split('-');
+  const start = `${ds}/${ms}/${ys}`;
+  if (range.start === range.end) return `${start} (${kind})`;
+  const [ye, me, de] = range.end.split('-');
+  return `${start} → ${de}/${me}/${ye} (${kind})`;
+}
+
+export async function importGetaroundListing(userId, { vehicle_id: vehicleId, url } = {}) {
+  const accountId = await accountIdFor(userId);
+  const profile = await userEmail(userId);
+  const vehicles = await listRecords(accountId, 'vehicle');
+  const vehicle = vehicles.find((item) => item.id === vehicleId);
+  if (!vehicle) {
+    const error = new Error('Véhicule introuvable');
+    error.status = 404;
+    throw error;
+  }
+
+  const listingUrl = assertGetaroundListingUrl(url || vehicle.getaround_listing_url);
+  const html = await fetchListingHtml(listingUrl);
+  const ranges = unavailableRanges(parseGetaroundCalendar(html));
+  const bookings = await listRecords(accountId, 'booking');
+  const previous = bookings.filter((booking) => booking.vehicle_id === vehicle.id && booking.source === 'getaround_listing');
+  for (const booking of previous) {
+    await deleteRecord(accountId, 'booking', booking.id);
+  }
+
+  let created = 0;
+  for (const range of ranges) {
+    const window = bookingWindow(range);
+    await createRecord(accountId, 'booking', {
+      vehicle_id: vehicle.id,
+      platform: 'getaround',
+      start_date: window.start_date,
+      end_date: window.end_date,
+      customer_name: 'Annonce publique',
+      guest_name: 'Annonce publique',
+      status: 'confirmed',
+      source: 'getaround_listing',
+      block_kind: range.kind,
+      notes: 'Lu sur l’annonce publique Getaround. Cette période n’est pas renvoyée vers la plateforme.',
+    }, { email: profile.email });
+    created += 1;
+  }
+
+  const readAt = new Date().toISOString();
+  await updateRecord(accountId, 'vehicle', vehicle.id, {
+    getaround_listing_url: listingUrl,
+    listing_read_at: readAt,
+    listing_blocks: ranges,
+  });
+
+  const preview = ranges.slice(0, 8).map(listingBlockLabel).join(', ');
+  const extra = ranges.length > 8 ? ` et ${ranges.length - 8} autre(s)` : '';
+  const summary = ranges.length === 0
+    ? 'Aucune date indisponible sur la période publiée. Les anciens blocages lus sur cette annonce ont été retirés.'
+    : `${created} période(s) indisponible(s) importée(s) dans FleetSync : ${preview}${extra}. Rien n’est renvoyé vers Getaround ni Turo.`;
+
+  return {
+    ranges,
+    count: ranges.length,
+    bookings_created: created,
+    listing_read_at: readAt,
     summary,
   };
 }

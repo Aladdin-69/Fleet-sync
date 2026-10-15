@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import { Car, Calendar, CheckCircle2, Clock, ExternalLink, User, Hash, ChevronDown, Pencil, Trash2, Archive } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Car, Calendar, CheckCircle2, Clock, ExternalLink, User, Hash, ChevronDown, Pencil, Trash2, Archive, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { format, parseISO, differenceInDays, differenceInHours } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { toast } from 'sonner';
+import apiClient from '@/api/client';
 import { useLanguage } from '@/components/LanguageProvider';
 
 const platformBadges = {
@@ -12,8 +16,18 @@ const platformBadges = {
   hunos_rent: { label: 'Hunos Rent', color: 'bg-green-100 text-green-700 border-green-200' }
 };
 
+function listingBlockLabel(block) {
+  const kind = block.kind === 'morning' ? 'matin' : block.kind === 'afternoon' ? 'après-midi' : 'journée';
+  const start = format(parseISO(block.start), 'd MMM', { locale: fr });
+  if (block.start === block.end) return `${start} (${kind})`;
+  const end = format(parseISO(block.end), 'd MMM', { locale: fr });
+  return `${start} → ${end} (${kind})`;
+}
+
 export default function VehicleCard({ vehicle, currentBooking, onClick, onEdit, onDelete, onArchive }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const [readingListing, setReadingListing] = useState(false);
   
   const statusConfig = {
     available: { label: t('vehicles.available'), color: 'bg-emerald-500', textColor: 'text-emerald-600' },
@@ -136,6 +150,68 @@ export default function VehicleCard({ vehicle, currentBooking, onClick, onEdit, 
           <p className="text-xs text-slate-400 mt-1 font-mono">{vehicle.license_plate}</p>
         )}
         
+        {vehicle.getaround_listing_url && (
+          <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-slate-700">Annonce Getaround</p>
+              <a
+                href={vehicle.getaround_listing_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+            {vehicle.listing_read_at && (
+              <p className="text-xs text-slate-500 mt-1">
+                Lue le {format(parseISO(vehicle.listing_read_at), 'd MMM yyyy · HH:mm', { locale: fr })}
+              </p>
+            )}
+            {vehicle.listing_blocks?.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {vehicle.listing_blocks.slice(0, 4).map((block) => (
+                  <li key={`${block.start}-${block.end}-${block.kind}`} className="text-xs text-slate-600">
+                    {listingBlockLabel(block)}
+                  </li>
+                ))}
+                {vehicle.listing_blocks.length > 4 && (
+                  <li className="text-xs text-slate-400">+ {vehicle.listing_blocks.length - 4} autre(s) période(s)</li>
+                )}
+              </ul>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3 w-full"
+              disabled={readingListing}
+              onClick={async () => {
+                setReadingListing(true);
+                try {
+                  const response = await apiClient.functions.invoke('readGetaroundListing', { vehicle_id: vehicle.id });
+                  queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+                  queryClient.invalidateQueries({ queryKey: ['bookings'] });
+                  toast.success(response.data?.summary || 'Dates indisponibles mises à jour');
+                } catch (error) {
+                  toast.error(error.message || 'Lecture de l’annonce impossible');
+                } finally {
+                  setReadingListing(false);
+                }
+              }}
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-2', readingListing && 'animate-spin')} />
+              {readingListing ? 'Lecture...' : 'Lire les dates indisponibles'}
+            </Button>
+          </div>
+        )}
+
+        {vehicle.platforms?.some((platform) => platform === 'turo' || platform === 'getaround') && (
+          <p className="mt-4 text-xs text-slate-500">
+            Turo France et Getaround France ne prennent pas d’iCal. FleetSync prépare le blocage, il reste à le saisir dans leur calendrier.
+          </p>
+        )}
+
         {/* Platforms */}
         <div className="flex flex-wrap gap-2 mt-4">
           {vehicle.platforms?.map((platform) => {
